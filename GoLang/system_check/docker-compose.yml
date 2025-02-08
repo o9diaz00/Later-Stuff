@@ -1,0 +1,10 @@
+services:
+  ubuntu:
+    container_name: ubuntu_22
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PATH: /usr/local/go/bin:$PATH
+    tty: true
+    stdin_open: true

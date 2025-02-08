@@ -1,0 +1,88 @@
+#! /bin/bash
+
+help()
+{
+  echo "Usage: deleteBucketFiles [-a| ACCOUNT] [-b| BUCKET] [-r| REGION] [-e| EXPIRY] [-f| FORMAT] [-s| SORT] [-h| HELP]";
+  echo -e "Required: \n\t-b\tThe bucket in which you want to delete from\n\t-r\tThe region where the bucket exists\n\t-e\tThe retention period in days\nOptional: \nt-a\The account in which the bucket resides [xxx] (defaults to xxx)\n\t-f\tThe format that corresponds to the bucket's directory structure (defaults to 1)\n\t-s\tThis will reverse the account ID list from the bottom up (by running two processes simultaneously, one with the sort reversal on and one without it, you can cover more ground)";
+}
+
+diff_date()
+{
+  timestamp=${1};
+  s3file=${2};
+
+  [[ $(echo ${timestamp} | wc -m) -eq 14 ]] && timestamp=$(echo "${timestamp}" | sed 's/\(.*\)-/\1 /');
+
+  d1=$(date -d "${timestamp}" "+%s");
+  d2=$(date +%s);
+  diff=$(((d2-d1)/86400));
+  diff=$(date -d@"${diff}" "+%s");
+
+  if [[ ${diff} -gt ${RETENTION} ]]; then
+    echo "[$(date "+%F %H:%M:%S")] Deleting ${s3file}" >> ${FILE};
+    rclone purge -P --checkers=100 --transfers=100 ${ACCOUNT}:${s3file} --s3-endpoint "${ENDPOINT}";
+  else
+    echo "${s3file} is not older than ${RETENTION} days";
+  fi
+}
+
+format1() # s3://$BUCKET/data/account_id=$ACCOUNT/day=$DAY
+{
+  if [[ ! $(rclone lsf --dirs-only ${ACCOUNT}:${BUCKET}/data/ --s3-endpoint "${ENDPOINT}" --checkers=100 --transfers=100 2>/dev/null | grep "account_id") ]]; then
+    echo "This is not the correct format!";
+    exit 1;
+  fi
+
+  echo "Getting bucket files...";
+  if [[ ${SORT} -eq 1 ]]; then
+    rclone lsf --dirs-only ${ACCOUNT}:${BUCKET}/data/ --s3-endpoint "${ENDPOINT}" --checkers=100 --transfers=100 | sort -r | while read account; do
+      rclone lsf --dirs-only ${ACCOUNT}:${BUCKET}/data/${account} --s3-endpoint "${ENDPOINT}" --checkers=100 --transfers=100 | grep -Eo "[0-9]+\-[0-9]+\-[0-9]+" | while read day; do
+        diff_date "${day}" "${BUCKET}/data/${account}day=${day}/";
+      done;
+    done;
+  fi
+}
+
+testParameters()
+{
+  if [[ $(rclone lsf --dirs-only ${ACCOUNT}:${BUCKET} --s3-endpoint "${ENDPOINT}" --checkers=100 --transfers=100 2>/dev/null) ]]; then
+    case "${FORMAT}" in
+      1|\?) format1;;
+      2) format2;;
+    esac
+  else
+    echo "Unable to find BUCKET [${BUCKET}] at ENDPOINT [${ENDPOINT}] in ACCOUNT [${ACCOUNT}]";
+  fi
+}
+
+BUCKET="";
+REGION="";
+RETENTION="";
+FORMAT="";
+ACCOUNT="";
+SORT=0;
+
+while getopts ":h:a:b:r:e:f:s:" opt; do
+  case $opt in
+    h|\?) help; exit 0;;
+    a) ACCOUNT=${OPTARG};;
+    b) BUCKET=${OPTARG};;
+    r) REGION=${OPTARG};;
+    e) RETENTION=${OPTARG};;
+    f) FORMAT=${OPTARG};;
+    s) SORT=${OPTARG};;
+  esac
+done && shift $((OPTIND-1))
+
+ENDPOINT="https://${REGION}.[REMOVED].com";
+FILE="_deleted.${BUCKET}.txt";
+[[ ! ${FORMAT} =~ ^[0-9]+$ ]] && FORMAT=1;
+[[ ! ${SORT} =~ ^[0-9]+$ ]] && SORT=0;
+[[ -z ${ACCOUNT} ]] && ACCOUNT="[REMOVED]";
+
+if [[ -z ${BUCKET} || -z ${REGION} || ! ${RETENTION} =~ ^[0-9]+$ ]]; then
+  help;
+  exit 1;
+fi
+
+testParameters;
