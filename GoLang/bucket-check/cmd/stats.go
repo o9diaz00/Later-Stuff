@@ -19,6 +19,7 @@ var (
     region string
     concurrency int
     profile string
+    endpoint string
 )
 
 type customResolver struct {
@@ -28,14 +29,14 @@ type customResolver struct {
 
 func (r customResolver) ResolveEndpoint(service, region string) (aws.Endpoint, error) {
     return aws.Endpoint {
-        URL:    "https://" + r.region + ".linodeobjects.com",
+        URL:    r.endpoint,
         SigningRegion:  r.region,
         HostnameImmutable: true,
     }, nil
 }
 
 func s3Client(ctx context.Context) (*s3.Client) {
-    cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region), config.WithSharedConfigProfile(profile), config.WithEndpointResolver(customResolver{region: region}))
+    cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region), config.WithSharedConfigProfile(profile), config.WithEndpointResolver(customResolver{region: region, endpoint: endpoint}))
     if (err != nil) {
         log.Fatal(err)
     }
@@ -47,6 +48,17 @@ var getStatsCmd = &cobra.Command {
     Use:    "stats",
     Short:  "Get the size of the bucket (or directory specified with prefix)",
     Run:    getSizeAndCount,
+}
+
+func convertBytes(size float64) (string) {
+    t := []string{"B", "K", "M", "G", "T", "P"};
+    var n = 0;
+
+    for size > 1000 {
+        size /= 1024;
+        n += 1;
+    }
+    return fmt.Sprintf("%.2f%s", size, t[n])
 }
 
 func getSizeAndCount(cmd *cobra.Command, args []string) {
@@ -94,7 +106,7 @@ func getSizeAndCount(cmd *cobra.Command, args []string) {
     close(pageCh);
     wg.Wait();
 
-    fmt.Printf("[%v]\nTotal Size: %d\nObject Count: %d\n", bucket, totalSize, totalCount);
+    fmt.Printf("[%v]\n - Total Size: %s\n - Object Count: %d\n", bucket, convertBytes(float64(totalSize)), totalCount);
 }
 
 
@@ -106,7 +118,8 @@ func init() {
     getStatsCmd.Flags().StringVarP(&bucket, "bucket", "b", "", "The bucket in which we want to check (required)")
     getStatsCmd.Flags().StringVarP(&prefix, "path", "p", "", "The subdirectory within the bucket we want to check")
     getStatsCmd.Flags().StringVarP(&region, "region", "r", "us-iad-8", "The region at which the bucket is located")
-    getStatsCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 5, "Number of concurrent workers")
+    getStatsCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of concurrent workers")
     getStatsCmd.Flags().StringVarP(&profile, "profile", "P", "default", "The profile used in the configuration file to authenticate with the endpoint")
+    getStatsCmd.Flags().StringVarP(&endpoint, "endpoint", "", "", "The endpoint at which the bucket exists")
     _ = getStatsCmd.MarkFlagRequired("bucket")
 }
