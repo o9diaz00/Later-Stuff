@@ -1,0 +1,87 @@
+pipeline {
+
+  environment {
+    AWS_ACCESS_KEY_ID = "${params.ACCESS_KEY}"
+    LINODE_OBJ_ACCESS_KEY = "${params.ACCESS_KEY}"
+    AWS_SECRET_ACCESS_KEY = "${params.SECRET_KEY}"
+    LINODE_OBJ_SECRET_KEY = "${params.SECRET_KEY}"
+    LINODE_TOKEN = "${params.LINODE_TOKEN}"
+  }
+
+  agent {
+    docker {
+      imagre "oowy/opentofu:latest"
+      args '-v /var/lib/jenkins/workspace:/var/jenkins_home --entrypoint "" -u 0'
+      reuseNode true
+    }
+  }
+
+  stages {
+
+    stage("Clone Repo") {
+      steps {
+        git credentialsId: "gitkey",
+          url: "xxx",
+          branch: "xxx"
+      }
+    }
+
+    stage("Setup KeyAgent") {
+      steps {
+        sh '''#! /bin/sh
+          apk add --no-cache openssh-client
+          git config --global url."yyy".insteadOf"xxx"
+          mkdir -p ~/.ssh
+          ssh-keyscan -t rsa -p $PORT xxx >> ~/.ssh/known_hosts
+          echo "Host xxx" >> ~/.ssh/config
+          echo "HostName xxx" >> ~/.ssh/config
+          echo "Port $PORT" >> ~/.ssh/config
+          echo "User git" >> ~/.ssh/config
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+        '''
+      }
+    }
+
+    stage("CD into working directory and perform terraform plans") {
+      steps {
+        sshagent(credentials: ['gitkey']) {
+          dir("xxx/${params.ACCOUNT}") {
+            sh '''#! /bin/sh
+              tofu init
+              tofu validate
+              tofu plan
+            '''
+          }
+        }
+      }
+    }
+
+    stage("Awaiting Approval") {
+      options {
+        timeout(time: 5, unit: 'MINUTES')
+      }
+      steps {
+        input message: "Do you want to apply these changes?", ok: "Yes"
+      }
+    }
+
+    stage("Apply plans") {
+      steps {
+        sshagent(credentials: ['gitkey']) {
+          dir("xxx/${params.ACCOUNT}") {
+            sh '''#! /bin/sh
+              tofu apply -auto-approve
+            '''
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+  }
+}
+        
